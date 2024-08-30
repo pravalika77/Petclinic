@@ -6,15 +6,11 @@ pipeline {
         maven 'maven3'
     }
     
-    environment {
-        SCANNER_HOME=tool 'sonar-scanner'
-    }
-    
     stages{
         
         stage("Git Checkout"){
             steps{
-                git branch: 'main', changelog: false, poll: false, url: 'https://github.com/jaiswaladi246/Petclinic.git'
+                git branch: 'main', url: 'https://github.com/pravalika77/Petclinic.git'
             }
         }
         
@@ -30,17 +26,6 @@ pipeline {
             }
         }
         
-        stage("Sonarqube Analysis "){
-            steps{
-                withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Petclinic \
-                    -Dsonar.java.binaries=. \
-                    -Dsonar.projectKey=Petclinic '''
-    
-                }
-            }
-        }
-        
         stage("OWASP Dependency Check"){
             steps{
                 dependencyCheck additionalArguments: '--scan ./ --format HTML ', odcInstallation: 'DP'
@@ -50,33 +35,26 @@ pipeline {
         
          stage("Build"){
             steps{
-                sh " mvn clean install"
+                sh " mvn clean package"
             }
         }
         
-        stage("Docker Build & Push"){
-            steps{
-                script{
-                   withDockerRegistry(credentialsId: '58be877c-9294-410e-98ee-6a959d73b352', toolName: 'docker') {
+         stage('Deploy to Elastic Beanstalk') {
+            steps {
+                script {
+                    withAWS(region: "${env.AWS_REGION}", credentials: "${env.AWS_CREDENTIALS_ID}") {
+                        // Initialize Elastic Beanstalk application
+                        sh 'eb init -p ${env.EB_PLATFORM} ${env.APPLICATION_NAME} --region ${env.AWS_REGION}'
                         
-                        sh "docker build -t image1 ."
-                        sh "docker tag image1 adijaiswal/pet-clinic123:latest "
-                        sh "docker push adijaiswal/pet-clinic123:latest "
+                        // Create the environment if it doesn't exist
+                        sh '''
+                        eb create ${env.ENVIRONMENT_NAME} || true
+                        '''
+                        
+                        // Deploy the application to Elastic Beanstalk
+                        sh 'eb deploy ${env.ENVIRONMENT_NAME}'
                     }
                 }
             }
         }
-        
-        stage("TRIVY"){
-            steps{
-                sh " trivy image adijaiswal/pet-clinic123:latest"
-            }
-        }
-        
-        stage("Deploy To Tomcat"){
-            steps{
-                sh "cp  /var/lib/jenkins/workspace/CI-CD/target/petclinic.war /opt/apache-tomcat-9.0.65/webapps/ "
-            }
-        }
-    }
 }
